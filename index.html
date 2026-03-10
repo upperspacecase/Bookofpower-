@@ -31,6 +31,7 @@ canvas{display:block;}
 #rotatePrompt p{font-size:18px;margin:4px 0;}
 #rotatePrompt .sub{font-size:12px;color:#888;margin-top:8px;}
 @keyframes rotateWiggle{0%,100%{transform:rotate(0deg);}25%{transform:rotate(90deg);}75%{transform:rotate(90deg);}}
+</style>
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -61,9 +62,17 @@ canvas{display:block;}
 // ====== ORIENTATION CHECK (mobile only) ======
 (function(){
   const prompt = document.getElementById('rotatePrompt');
+  function isTrueMobile(){
+    // Check for touch support AND mobile user agent (avoid matching desktop Safari/iPad desktop mode)
+    const hasTouchScreen = ('ontouchstart' in window) || (navigator.maxTouchPoints > 1);
+    const mobileUA = /Mobi|Android|iPhone/i.test(navigator.userAgent);
+    // Also detect iPad with touch (iPadOS reports as Mac but has touch)
+    const isIPad = (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ||
+                   /iPad/i.test(navigator.userAgent);
+    return hasTouchScreen && (mobileUA || isIPad);
+  }
   function checkOrientation(){
-    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
-    if(isMobile && window.innerHeight > window.innerWidth){
+    if(isTrueMobile() && window.innerHeight > window.innerWidth){
       prompt.style.display = 'flex';
     } else {
       prompt.style.display = 'none';
