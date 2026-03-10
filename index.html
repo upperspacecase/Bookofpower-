@@ -26,7 +26,11 @@ canvas{display:block;}
 #winScreen p,#loseScreen p{color:#ccc;font-family:monospace;font-size:14px;margin:12px 0 20px;}
 .restartBtn{padding:12px 36px;font-size:18px;background:#c8a030;color:#fff;border:none;border-radius:8px;cursor:pointer;font-family:monospace;}
 #allies{position:absolute;top:40px;left:10px;font-size:14px;color:#8f8;text-shadow:1px 1px 2px #000;font-family:monospace;}
-</style>
+#rotatePrompt{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:9999;color:#ffe088;font-family:monospace;text-align:center;}
+#rotatePrompt .icon{font-size:64px;margin-bottom:16px;animation:rotateWiggle 2s ease-in-out infinite;}
+#rotatePrompt p{font-size:18px;margin:4px 0;}
+#rotatePrompt .sub{font-size:12px;color:#888;margin-top:8px;}
+@keyframes rotateWiggle{0%,100%{transform:rotate(0deg);}25%{transform:rotate(90deg);}75%{transform:rotate(90deg);}}
 </head>
 <body>
 <canvas id="game"></canvas>
@@ -51,8 +55,25 @@ canvas{display:block;}
 </div>
 <div id="winScreen"><h1>💥 THE EVIL CHEETO IS DESTROYED!</h1><p>The cursed snack crumbles to dust. The iron sky army retreats.</p><button class="restartBtn" onclick="location.reload()">Play Again</button></div>
 <div id="loseScreen"><h1>DEFEATED</h1><p>The iron sky army prevails... for now.</p><button class="restartBtn" onclick="location.reload()">Try Again</button></div>
+<div id="rotatePrompt"><div class="icon">📱</div><p>Rotate your device</p><p class="sub">Book of Power is best played in landscape</p></div>
 
 <script>
+// ====== ORIENTATION CHECK (mobile only) ======
+(function(){
+  const prompt = document.getElementById('rotatePrompt');
+  function checkOrientation(){
+    const isMobile = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    if(isMobile && window.innerHeight > window.innerWidth){
+      prompt.style.display = 'flex';
+    } else {
+      prompt.style.display = 'none';
+    }
+  }
+  window.addEventListener('resize', checkOrientation);
+  window.addEventListener('orientationchange', checkOrientation);
+  checkOrientation();
+})();
+
 // ====== CONSTANTS ======
 const TILE = 16, MAP_W = 120, MAP_H = 120;
 const PIXEL_W = MAP_W * TILE, PIXEL_H = MAP_H * TILE;
@@ -266,6 +287,9 @@ let npcs = [];
 let cheetoX, cheetoY;
 let cheetoHP = 50, cheetoMaxHP = 50;
 const CHEETO_SIZE = 6; // tiles (6x6 = 96x96 pixels)
+let cheetoExploding = false, cheetoExplodeTimer = 0;
+const CHEETO_EXPLODE_DURATION = 90; // ~1.5s of explosion animation at 60fps
+let explosionParticles = [];
 
 // Keys
 const keys = {};
@@ -513,8 +537,25 @@ function spawnParticles(x,y,color,count,speed){
 
 // ====== UPDATE ======
 function update(){
-  if(!gameStarted||gameOver)return;
+  if(!gameStarted)return;
   time++;
+  // After game over, still tick particles/explosions but skip gameplay
+  if(gameOver){
+    // Tick explosion particles
+    for(let i=explosionParticles.length-1;i>=0;i--){
+      const p=explosionParticles[i];
+      p.x+=p.vx; p.y+=p.vy; p.vy+=0.05; p.life--;
+      p.size*=0.97;
+      if(p.life<=0)explosionParticles.splice(i,1);
+    }
+    for(let i=particles.length-1;i>=0;i--){
+      const p=particles[i];
+      p.x+=p.vx; p.y+=p.vy; p.vy+=0.1; p.life--;
+      if(p.life<=0)particles.splice(i,1);
+    }
+    if(screenShake>0)screenShake*=0.9;
+    return;
+  }
 
   // Player input
   let mx=0, my=0, moving=false;
@@ -643,7 +684,7 @@ function update(){
       screenShake=5;
       spawnParticles(player.x+8,player.y+8,'#f44',8,3);
       soldiers.splice(i,1);
-      if(player.hp<=0){gameOver=true;document.getElementById('loseScreen').style.display='flex';}
+      if(player.hp<=0){gameOver=true;setTimeout(()=>{document.getElementById('loseScreen').style.display='flex';},4000);}
       continue;
     }
 
@@ -692,7 +733,7 @@ function update(){
       player.invuln=60;
       screenShake=5;
       spawnParticles(player.x+8,player.y+8,'#f44',8,3);
-      if(player.hp<=0){gameOver=true;document.getElementById('loseScreen').style.display='flex';}
+      if(player.hp<=0){gameOver=true;setTimeout(()=>{document.getElementById('loseScreen').style.display='flex';},4000);}
     }
 
     // Book collision
@@ -730,6 +771,40 @@ function update(){
     const p=particles[i];
     p.x+=p.vx; p.y+=p.vy; p.vy+=0.1; p.life--;
     if(p.life<=0)particles.splice(i,1);
+  }
+
+  // Cheeto explosion
+  if(cheetoExploding){
+    cheetoExplodeTimer--;
+    // Spawn secondary bursts during explosion
+    if(cheetoExplodeTimer%8===0 && cheetoExplodeTimer>20){
+      let sz = CHEETO_SIZE*TILE;
+      let ecx = cheetoX*TILE + sz/2 + (Math.random()-0.5)*sz;
+      let ecy = cheetoY*TILE + sz/2 + (Math.random()-0.5)*sz;
+      const colors = ['#f90','#fc0','#f44','#ff6','#fff'];
+      for(let i=0;i<15;i++){
+        let ang=Math.random()*Math.PI*2;
+        let spd=1+Math.random()*4;
+        explosionParticles.push({
+          x:ecx, y:ecy, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+          life:20+Math.random()*30, color:colors[Math.floor(Math.random()*colors.length)],
+          size:2+Math.random()*6
+        });
+      }
+      screenShake = 8;
+    }
+    // Update explosion particles
+    for(let i=explosionParticles.length-1;i>=0;i--){
+      const p=explosionParticles[i];
+      p.x+=p.vx; p.y+=p.vy; p.vy+=0.05; p.life--;
+      p.size*=0.97;
+      if(p.life<=0)explosionParticles.splice(i,1);
+    }
+    // End explosion → delay 4s → show win screen
+    if(cheetoExplodeTimer<=0){
+      gameWon=true; gameOver=true;
+      setTimeout(()=>{ document.getElementById('winScreen').style.display='flex'; }, 4000);
+    }
   }
 
   // Power-ups
@@ -784,10 +859,23 @@ function update(){
       books.splice(j,1);
       spawnParticles(bk.x,bk.y,'#f90',8,3);
       screenShake=3;
-      if(cheetoHP<=0){
-        gameWon=true; gameOver=true;
-        spawnParticles(cheetoCX,cheetoCY,'#fc0',30,6);
-        document.getElementById('winScreen').style.display='flex';
+      if(cheetoHP<=0 && !cheetoExploding){
+        cheetoExploding = true;
+        cheetoExplodeTimer = CHEETO_EXPLODE_DURATION;
+        // Spawn massive explosion particles
+        let sz = CHEETO_SIZE * TILE;
+        let ecx = cheetoX*TILE + sz/2, ecy = cheetoY*TILE + sz/2;
+        const colors = ['#f90','#fc0','#f44','#ff6','#fff','#f80','#fa0'];
+        for(let i=0;i<80;i++){
+          let ang = Math.random()*Math.PI*2;
+          let spd = 1 + Math.random()*6;
+          explosionParticles.push({
+            x:ecx, y:ecy, vx:Math.cos(ang)*spd, vy:Math.sin(ang)*spd,
+            life:40+Math.random()*50, color:colors[Math.floor(Math.random()*colors.length)],
+            size:3+Math.random()*8
+          });
+        }
+        screenShake = 15;
       }
     }
   }
@@ -1103,25 +1191,55 @@ function drawNPC(n){
   }
 }
 
+function drawExplosionParticles(){
+  for(const p of explosionParticles){
+    let px = p.x - camX, py = p.y - camY;
+    ctx.globalAlpha = Math.min(1, p.life/15);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();ctx.arc(px, py, p.size, 0, Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawCheeto(){
-  if(cheetoHP<=0) return;
+  if(cheetoHP<=0 && !cheetoExploding) return;
+  if(cheetoExploding && cheetoExplodeTimer<=0) return;
   let sz = CHEETO_SIZE * TILE; // 96px
   let sx=cheetoX*TILE-camX, sy=cheetoY*TILE-camY;
   let cx=sx+sz/2, cy=sy+sz/2;
   if(sx<-sz||sy<-sz||sx>W+sz||sy>H+sz)return;
 
+  // Explosion effect — scale up, flash, fade out
+  let explodeAlpha = 1, explodeScale = 1;
+  if(cheetoExploding){
+    let progress = 1 - cheetoExplodeTimer / CHEETO_EXPLODE_DURATION;
+    explodeAlpha = Math.max(0, 1 - progress * 1.5);
+    explodeScale = 1 + progress * 2;
+    // Flash white periodically
+    if(cheetoExplodeTimer % 6 < 3){
+      ctx.save();
+      ctx.globalAlpha = explodeAlpha * 0.6;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();ctx.arc(cx, cy, sz/2 * explodeScale + 20, 0, Math.PI*2);ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // Pulsing glow
   ctx.save();
-  ctx.globalAlpha=0.3+Math.sin(time*0.08)*0.15;
+  ctx.globalAlpha=(0.3+Math.sin(time*0.08)*0.15) * explodeAlpha;
   ctx.fillStyle='#f80';
-  ctx.beginPath();ctx.arc(cx,cy,sz/2+12,0,Math.PI*2);ctx.fill();
+  ctx.beginPath();ctx.arc(cx,cy,(sz/2+12)*explodeScale,0,Math.PI*2);ctx.fill();
   ctx.globalAlpha=1;
   ctx.restore();
 
   // Giant cheeto body — pixel art style with bumpy texture
-  let shake = cheetoHP < cheetoMaxHP ? Math.sin(time*0.5)*(1-cheetoHP/cheetoMaxHP)*3 : 0;
+  let shake = cheetoExploding ? Math.sin(time*2)*(cheetoExplodeTimer/CHEETO_EXPLODE_DURATION)*10 :
+    (cheetoHP < cheetoMaxHP ? Math.sin(time*0.5)*(1-cheetoHP/cheetoMaxHP)*3 : 0);
   ctx.save();
+  ctx.globalAlpha = explodeAlpha;
   ctx.translate(cx+shake, cy);
+  ctx.scale(explodeScale, explodeScale);
 
   // Main body — curved cheeto shape
   ctx.fillStyle='#f90';
@@ -1285,6 +1403,7 @@ function draw(){
 
   // Draw cheeto
   drawCheeto();
+  drawExplosionParticles();
 
   // Draw power-ups
   for(const p of powerups)drawPowerup(p);
@@ -1369,6 +1488,9 @@ document.querySelectorAll('.diffBtn').forEach(btn => {
     player.maxHp = diff.playerHP;
     cheetoHP = diff.cheetoHP;
     cheetoMaxHP = diff.cheetoHP;
+    cheetoExploding = false;
+    cheetoExplodeTimer = 0;
+    explosionParticles = [];
     startGame();
     document.getElementById('startScreen').style.display='none';
     gameStarted=true;
